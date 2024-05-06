@@ -29,8 +29,8 @@ cursor.execute('''
 conn.commit()
 
 # Initialize the bot
-bot = telebot.TeleBot('6824276007:AAFXqFkU8Re5n7fWxPzh4bWH9v5sjOH-xZw')
-
+bot = telebot.TeleBot('6824276007:AAGLBnYp7zetjJeLdASJLFvY1LXUPTqnMWc')
+started_users = set()
 # Function to send notification
 def send_notification(chat_id, goal):
     markup = telebot.types.InlineKeyboardMarkup()
@@ -56,13 +56,17 @@ def run_scheduler():
 # Command handler for /start
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    bot.send_message(message.chat.id, f'Hello {message.from_user.first_name}, how can I help you?')
-    # Check if the user is in the database. If not, add them
-    cursor.execute('SELECT * FROM users WHERE user_id = ?', (message.chat.id,))
-    if not cursor.fetchone():
-        cursor.execute('INSERT INTO users (user_id, first_name) VALUES (?, ?)',
-                       (message.chat.id, message.from_user.first_name))
-        conn.commit()
+    if message.chat.id not in started_users:
+        bot.send_message(message.chat.id, f'Hello {message.from_user.first_name}, how can I help you?')
+
+        # Check if the user is in the database. If not, add them
+        query_user_name = message.from_user.first_name
+        cursor.execute('SELECT * FROM users WHERE first_name = ?', (query_user_name,))
+        if not cursor.fetchone():
+            cursor.execute('INSERT INTO users (first_name) VALUES (?)', (query_user_name,))
+            conn.commit()
+
+
 
 
 # Command handler for /help
@@ -116,23 +120,32 @@ def handle_callback(call):
         cursor.execute('UPDATE goals SET completed = 0 WHERE user_id = ? AND goal = ?', (call.message.chat.id, goal))
         conn.commit()
         bot.answer_callback_query(call.id, f"You marked goal '{goal}' as not completed")
-
+@bot.message_handler(commands=['debug'])
+def handle_debug(message):
+    connection = sqlite3.connect("goals.db")
+    cursor = connection.cursor()
+    cursor.execute("SELECT * FROM users")
+    print("Users:")
+    print(cursor.fetchall())
+    cursor.execute("SELECT * FROM goals")
+    print("Goals")
+    print(cursor.fetchall())
 
 # Start the scheduler in a separate thread
-scheduler_thread = threading.Thread(target=run_scheduler)
-scheduler_thread.start()
 
-# Start polling the bot
-while True:
-    try:
-        bot.polling(none_stop=True)
-
-    except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(2)  # Wait for 15 seconds before retrying polling
 def main():
     print("Main function called")
+    scheduler_thread = threading.Thread(target=run_scheduler)
+    scheduler_thread.start()
 
+    # Start polling the bot
+    while True:
+        try:
+            bot.polling(none_stop=True)
+
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(2)  # Wait for 15 seconds before retrying polling
 
 if __name__ == '__main__':
     main()
