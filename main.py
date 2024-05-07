@@ -3,6 +3,11 @@ import schedule
 import time
 import threading
 import sqlite3
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import os
 
 # Create a connection to the SQLite database
 conn = sqlite3.connect('goals.db', check_same_thread=False)
@@ -11,7 +16,7 @@ cursor = conn.cursor()
 # Create a table to store users if it doesn't exist
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
         first_name TEXT
     )
 ''')
@@ -29,7 +34,7 @@ cursor.execute('''
 conn.commit()
 
 # Initialize the bot
-bot = telebot.TeleBot('6824276007:AAGLBnYp7zetjJeLdASJLFvY1LXUPTqnMWc')
+bot = telebot.TeleBot('6824276007:AAFyHqxGV2lGLLJGNLMRyExoiUxMSTlvaw0')
 started_users = set()
 # Function to send notification
 def send_notification(chat_id, goal):
@@ -76,6 +81,10 @@ def handle_help(message):
     List of available commands:
     /start - start conversation with the bot
     /help - get a list of available commands
+    /setdailygoals - to set <goal> and <time>
+    /totalgoals - to see how many goals are completed and not completed
+    /completegoal - to complete not completed <goal>
+    /resetgoals - to delete all goals
     """
     bot.send_message(message.chat.id, help_text)
 
@@ -120,6 +129,127 @@ def handle_callback(call):
         cursor.execute('UPDATE goals SET completed = 0 WHERE user_id = ? AND goal = ?', (call.message.chat.id, goal))
         conn.commit()
         bot.answer_callback_query(call.id, f"You marked goal '{goal}' as not completed")
+
+# Command handler for /totalgoals
+@bot.message_handler(commands=['totalgoals'])
+def total_goals(message):
+    try:
+        # Get the user ID
+        user_id = message.chat.id
+
+        # Retrieve completed and not completed goals for the user
+        cursor.execute('SELECT goal, completed FROM goals WHERE user_id = ?', (user_id,))
+        goals = cursor.fetchall()
+
+        total_goals_count = len(goals)
+
+        if goals:
+            goals_message = f"You have set {total_goals_count} goal(s):\n"
+            for goal, completed in goals:
+                status = "✅" if completed == 1 else "❌"
+                goals_message += f"- {goal} {status}\n"
+            bot.send_message(message.chat.id, goals_message)
+        else:
+            bot.send_message(message.chat.id, "You haven't set any goals yet.")
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+#Command handler for /resetgoals
+@bot.message_handler(commands=['resetgoals'])
+def reset_goals(message):
+    try:
+        # Get the user ID
+        user_id = message.chat.id
+
+        # Delete all goals for the user
+        cursor.execute('DELETE FROM goals WHERE user_id = ?', (user_id,))
+        conn.commit()
+
+        bot.send_message(message.chat.id, "All goals have been reset.")
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+
+# Command handler for /completegoal
+@bot.message_handler(commands=['completegoal'])
+def complete_goal(message):
+    try:
+        args = message.text.split()[1:]
+        if len(args) < 1:
+            raise ValueError("Usage: /completegoal <goal>")
+
+        goal_title = ' '.join(args)
+
+        # Get the user ID
+        user_id = message.chat.id
+
+        # Update the completion status of the goal
+        cursor.execute('UPDATE goals SET completed = 1 WHERE user_id = ? AND goal = ?', (user_id, goal_title))
+        conn.commit()
+
+        bot.reply_to(message, f"You marked goal '{goal_title}' as completed ✅.")
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+
+# Command handler for /visual
+@bot.message_handler(commands=['visual'])
+def visualize_goals(message):
+    try:
+        # Get the user ID
+        user_id = message.chat.id
+
+        # Retrieve completed and not completed goals for the user
+        cursor.execute('SELECT completed FROM goals WHERE user_id = ?', (user_id,))
+        goals = cursor.fetchall()
+
+        if not goals:
+            bot.send_message(message.chat.id, "You haven't set any goals yet.")
+            return
+
+        completed_count = sum(1 for goal in goals if goal[0] == 1)
+        not_completed_count = sum(1 for goal in goals if goal[0] == 0)
+
+        # Plot the graph
+        labels = ['Completed', 'Not Completed']
+        counts = [completed_count, not_completed_count]
+        colors = ['green', 'red']
+
+        plt.bar(labels, counts, color=colors)
+        plt.xlabel('Goal Status')
+        plt.ylabel('Count')
+        plt.title('Completed vs. Not Completed Goals')
+
+        # Save the plot as an image
+        plot_filename = f'{user_id}_goals_plot.png'
+        plt.savefig(plot_filename)
+
+        # Send the plot image
+        with open(plot_filename, 'rb') as plot_image:
+            bot.send_photo(message.chat.id, plot_image)
+
+        # Remove the plot image file
+        os.remove(plot_filename)
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+# Command handler for /resetusers
+@bot.message_handler(commands=['resetusers'])
+def reset_users(message):
+    try:
+        # Delete all users from the database
+        cursor.execute('DELETE FROM users')
+        conn.commit()
+
+        bot.send_message(message.chat.id, "All users have been deleted.")
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
 @bot.message_handler(commands=['debug'])
 def handle_debug(message):
     connection = sqlite3.connect("goals.db")
